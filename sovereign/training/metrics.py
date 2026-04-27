@@ -52,9 +52,17 @@ class EpisodeMetricsCallback(BaseCallback):
             self.episodes_path.unlink()
 
     def _on_step(self) -> bool:  # type: ignore[override]
-        infos = self.locals.get("infos") or []
-        rewards = self.locals.get("rewards") or []
-        dones = self.locals.get("dones") or []
+        # `or []` collapses a length-1 numpy array because its scalar bool is False
+        # when the value is 0; we must compare to None explicitly.
+        infos = self.locals.get("infos")
+        if infos is None:
+            infos = []
+        rewards = self.locals.get("rewards")
+        if rewards is None:
+            rewards = np.zeros(0, dtype=np.float32)
+        dones = self.locals.get("dones")
+        if dones is None:
+            dones = np.zeros(0, dtype=bool)
         actions = self.locals.get("actions")
 
         for i, info in enumerate(infos):
