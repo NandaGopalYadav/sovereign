@@ -1,0 +1,55 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sovereign"
+version = "0.1.0"
+description = "A geopolitical conflict environment for studying whether modeled costs of occupation make invasion strategically dominated."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "gymnasium>=0.29",
+    "numpy>=1.24",
+    "networkx>=3.1",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+train = [
+    "stable-baselines3>=2.3",
+    "torch>=2.1",
+    "tensorboard>=2.15",
+    "tqdm>=4.66",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+]
+ui = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "pydantic>=2.6",
+]
+dev = [
+    "pytest>=7.4",
+    "ruff>=0.4",
+    "black>=24.3",
+]
+
+[tool.setuptools.packages.find]
+include = ["sovereign*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "B", "UP"]
+ignore = ["N803", "N806"]  # we use math-style names (M, U, L) deliberately
+
+[tool.black]
+line-length = 100
+target-version = ["py310"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

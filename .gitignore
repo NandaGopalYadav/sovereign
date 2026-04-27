@@ -1,0 +1,29 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.DS_Store
+*.egg-info/
+build/
+dist/
+
+# Training artifacts
+results/
+runs/
+tb/
+*.zip
+*.pt
+*.ckpt
+
+# Frontend
+node_modules/
+sovereign/ui/frontend/dist/
+sovereign/ui/frontend/.vite/
+
+# Editor
+.vscode/
+.idea/
+*.swp

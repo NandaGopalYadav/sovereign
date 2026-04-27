@@ -1,0 +1,56 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    @apply h-full bg-bg text-ink;
+    font-family: "Inter", system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+  }
+  body {
+    @apply selection:bg-accent/30 selection:text-ink;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-thumb { background: #2a2d35; border-radius: 4px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+}
+
+@layer components {
+  .panel {
+    @apply bg-bg-panel border border-line;
+  }
+  .pill {
+    @apply inline-flex items-center px-1.5 py-0.5 text-xxs uppercase tracking-wider
+           border border-line text-ink-dim;
+  }
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-family: "JetBrains Mono", ui-monospace, Menlo, monospace;
+  }
+  .axis-label {
+    @apply text-xxs uppercase tracking-wider text-ink-mute;
+  }
+}
+
+/* Small "scanlines" feel on threshold gauges so they read as instruments, not chrome. */
+.gauge-track {
+  background-image:
+    repeating-linear-gradient(
+      to right,
+      rgba(255,255,255,0.02) 0,
+      rgba(255,255,255,0.02) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+}
+
+/* Pulse used very sparingly — only on truly contested territories. */
+@keyframes contested-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(211, 148, 89, 0.0); }
+  50%      { box-shadow: 0 0 0 4px rgba(211, 148, 89, 0.18); }
+}
+.is-contested {
+  animation: contested-pulse 3.2s ease-in-out infinite;
+}
