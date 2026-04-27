@@ -103,7 +103,10 @@ def test_legitimacy_collapse_terminates() -> None:
     env.reset(seed=2)
     assert env.state is not None
     env.state.legitimacy = 0.0
-    _, reward, term, _, info = env.step(env.action_space.sample())
+    # Use a deterministic hold/hold action — propaganda would bump L back above zero
+    # before the terminal check fires, masking the collapse with a different outcome.
+    hold = env.encode_action(pol=0, mil=0, target=0)
+    _, reward, term, _, info = env.step(hold)
     assert term
     assert info["terminal_reason"] == "legitimacy_collapse"
     assert reward < -40.0
@@ -115,7 +118,9 @@ def test_invader_destroyed_terminates() -> None:
     assert env.state is not None
     env.state.invader_units[:] = 0
     env.state.invader_strike = 0
-    _, reward, term, _, info = env.step(env.action_space.sample())
+    # Hold/hold so we don't accidentally negotiate a settlement first.
+    hold = env.encode_action(pol=0, mil=0, target=0)
+    _, reward, term, _, info = env.step(hold)
     assert term
     assert info["terminal_reason"] == "invader_destroyed"
     assert reward < -20.0
