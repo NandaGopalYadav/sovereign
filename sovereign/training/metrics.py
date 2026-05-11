@@ -45,6 +45,19 @@ class EpisodeMetricsCallback(BaseCallback):
         self._legitimacy_buffers: dict[int, list[float]] = {}
         self._reward_decompositions: dict[int, list[dict[str, float]]] = {}
         self._start_times: dict[int, float] = {}
+        # Mechanism-engagement signals — these are the metrics the ablation
+        # comparison needs in order to verify that `full` and `baseline`
+        # produce *different trajectories* before terminal settlement, not
+        # just different terminal labels.
+        self._sanctions_buffers: dict[int, list[bool]] = {}
+        self._insurgency_buffers: dict[int, list[bool]] = {}
+        self._t_occ_buffers: dict[int, list[int]] = {}
+        self._territory_buffers: dict[int, list[float]] = {}
+        self._rejection_buffers: dict[int, list[str]] = {}
+        self._connected_resource_buffers: dict[int, list[float]] = {}
+        self._controlled_resource_buffers: dict[int, list[float]] = {}
+        self._pressure_streak_buffers: dict[int, list[int]] = {}
+        self._occupied_turn_buffers: dict[int, list[int]] = {}
 
     def _on_training_start(self) -> None:  # type: ignore[override]
         # Writing the file fresh on each fit, not appending — avoids stale runs.
@@ -72,6 +85,15 @@ class EpisodeMetricsCallback(BaseCallback):
                 self._theta_buffers[i] = []
                 self._legitimacy_buffers[i] = []
                 self._reward_decompositions[i] = []
+                self._sanctions_buffers[i] = []
+                self._insurgency_buffers[i] = []
+                self._t_occ_buffers[i] = []
+                self._territory_buffers[i] = []
+                self._rejection_buffers[i] = []
+                self._connected_resource_buffers[i] = []
+                self._controlled_resource_buffers[i] = []
+                self._pressure_streak_buffers[i] = []
+                self._occupied_turn_buffers[i] = []
                 self._start_times[i] = time.time()
 
             self._reward_buffers[i].append(float(rewards[i]))
@@ -81,6 +103,19 @@ class EpisodeMetricsCallback(BaseCallback):
             self._legitimacy_buffers[i].append(float(info.get("legitimacy", 0.0)))
             if "reward_components" in info:
                 self._reward_decompositions[i].append(info["reward_components"])
+            self._sanctions_buffers[i].append(bool(info.get("sanctions_active", False)))
+            # Per-territory model: each turn can produce 0..N insurgency events.
+            # Track the count so episode-level totals are accurate.
+            self._insurgency_buffers[i].append(int(info.get("insurgency_events_this_step", int(bool(info.get("insurgency_event", False))))))
+            self._t_occ_buffers[i].append(int(info.get("t_occ", 0)))
+            self._territory_buffers[i].append(float(info.get("territory_share", 0.0)))
+            self._connected_resource_buffers[i].append(float(info.get("connected_resource_yield", 0.0)))
+            self._controlled_resource_buffers[i].append(float(info.get("controlled_resource_yield", 0.0)))
+            self._pressure_streak_buffers[i].append(int(info.get("pressure_streak", 0)))
+            self._occupied_turn_buffers[i].append(int(info.get("occupied_territory_turns", 0)))
+            verdict = info.get("settlement_verdict")
+            if verdict is not None and not verdict.get("accepted", False):
+                self._rejection_buffers[i].append(str(verdict.get("reason", "rejected")))
 
             if dones[i]:
                 self._flush_episode(i, info)
@@ -93,19 +128,64 @@ class EpisodeMetricsCallback(BaseCallback):
         legitimacies = self._legitimacy_buffers[env_idx]
         actions = self._action_buffers[env_idx]
         decompositions = self._reward_decompositions[env_idx]
+        sanctions = self._sanctions_buffers[env_idx]
+        insurgencies = self._insurgency_buffers[env_idx]
+        t_occs = self._t_occ_buffers[env_idx]
+        territories = self._territory_buffers[env_idx]
+        rejections = self._rejection_buffers[env_idx]
+        connected_resources = self._connected_resource_buffers[env_idx]
+        controlled_resources = self._controlled_resource_buffers[env_idx]
+        pressure_streaks = self._pressure_streak_buffers[env_idx]
+        occupied_turns = self._occupied_turn_buffers[env_idx]
 
         ep_idx = self._ep_count
         self._ep_count += 1
 
+        # Cumulative cost components, summed over the episode. The keys in
+        # `reward_components` are signed (costs are already negative), so we
+        # take absolute value to report cumulative *exposure* rather than net.
+        def _cum(name: str) -> float:
+            return float(sum(abs(d.get(name, 0.0)) for d in decompositions))
+
+        from collections import Counter
+        rejection_counts = dict(Counter(rejections)) if rejections else {}
+
+        n = len(rewards)
         summary = {
             "episode": ep_idx,
             "env_idx": env_idx,
-            "length": len(rewards),
+            "length": n,
             "return": float(sum(rewards)),
-            "mean_theta": float(np.mean(thetas)) if thetas else 0.0,
-            "min_legitimacy": float(np.min(legitimacies)) if legitimacies else 0.0,
             "terminal_reason": last_info.get("terminal_reason"),
             "wall_seconds": time.time() - self._start_times[env_idx],
+            # θ statistics
+            "mean_theta": float(np.mean(thetas)) if thetas else 0.0,
+            "max_theta": float(np.max(thetas)) if thetas else 0.0,
+            "min_theta": float(np.min(thetas)) if thetas else 0.0,
+            # Legitimacy statistics
+            "min_legitimacy": float(np.min(legitimacies)) if legitimacies else 0.0,
+            "mean_legitimacy": float(np.mean(legitimacies)) if legitimacies else 0.0,
+            # Mechanism-engagement signals
+            "sanctions_step_fraction": float(np.mean(sanctions)) if sanctions else 0.0,
+            "insurgency_event_count": int(sum(insurgencies)),     # total events (per-territory rolls)
+            "insurgency_event_turns": int(sum(1 for x in insurgencies if x > 0)),  # turns w/ ≥1 event
+            "max_t_occ": int(max(t_occs)) if t_occs else 0,
+            "mean_t_occ": float(np.mean(t_occs)) if t_occs else 0.0,
+            "max_territory_share": float(np.max(territories)) if territories else 0.0,
+            "final_territory_share": float(territories[-1]) if territories else 0.0,
+            "mean_connected_resource_yield": float(np.mean(connected_resources)) if connected_resources else 0.0,
+            "mean_controlled_resource_yield": float(np.mean(controlled_resources)) if controlled_resources else 0.0,
+            "max_pressure_streak": int(max(pressure_streaks)) if pressure_streaks else 0,
+            "final_occupied_territory_turns": int(occupied_turns[-1]) if occupied_turns else 0,
+            # Cumulative cost exposure (independent of the live ablation flags —
+            # whatever the env actually paid out is recorded).
+            "cum_occupation_cost": _cum("occupation_cost"),
+            "cum_legitimacy_cost": _cum("legitimacy_cost"),
+            "cum_sanction_cost": _cum("sanction_cost"),
+            "cum_insurgency_cost": _cum("insurgency_cost"),
+            # Settlement attempt failures, by reason. Empty dict if the agent
+            # never tried to negotiate or always succeeded.
+            "settlement_rejections": rejection_counts,
         }
         with self.episodes_path.open("a") as fh:
             fh.write(json.dumps(summary) + "\n")
@@ -136,4 +216,13 @@ class EpisodeMetricsCallback(BaseCallback):
         self._theta_buffers[env_idx] = []
         self._legitimacy_buffers[env_idx] = []
         self._reward_decompositions[env_idx] = []
+        self._sanctions_buffers[env_idx] = []
+        self._insurgency_buffers[env_idx] = []
+        self._t_occ_buffers[env_idx] = []
+        self._territory_buffers[env_idx] = []
+        self._rejection_buffers[env_idx] = []
+        self._connected_resource_buffers[env_idx] = []
+        self._controlled_resource_buffers[env_idx] = []
+        self._pressure_streak_buffers[env_idx] = []
+        self._occupied_turn_buffers[env_idx] = []
         self._start_times[env_idx] = time.time()

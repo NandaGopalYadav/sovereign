@@ -17,6 +17,9 @@ from sovereign.env.config import (
     DriftCoefficients,
     HazardParams,
     RewardWeights,
+    SettlementAcceptance,
+    SettlementBonusWeights,
+    TerminalPayoffs,
     Thresholds,
 )
 
@@ -89,29 +92,25 @@ def update_threshold_events(
 
 @dataclass
 class DriftSignals:
-    """The behavioural inputs that feed the drift function μ(s, a).
+    """The behavioural inputs that feed the rulebook Section 7.2 drift function."""
 
-    Each is a normalized scalar in roughly [0, 1] (legitimacy is already in [0,1]).
-    `economic_pressure` is `1 - E` so a depleted economy pushes θ up.
-    """
-
-    invader_aggression: float          # ∈ [0,1] — fraction of last turn's mil actions that were attacks/strikes
-    occupation_fraction: float         # ∈ [0,1] — share of non-invader territories occupied
     legitimacy_loss: float             # ∈ [0,1] — equals (1 - L)
-    defender_morale: float             # ∈ [0,1] — defender alive AND holding home capital
-    invader_concession: float          # ∈ [0,1] — 1 if last political move was negotiate or withdraw
-    economic_pressure: float           # ∈ [0,1] — equals (1 - E)
+    advance_action: float              # ∈ {0,1} — military advance/attack
+    strike_action: float               # ∈ {0,1} — strike action
+    negotiate_action: float            # ∈ {0,1} — substantive negotiation
+    seek_alliance_action: float        # ∈ {0,1} — seek-alliance political action
+    occupation_duration: float         # ∈ [0,1] — t_occ / T_max
 
 
 def drift(signals: DriftSignals, c: DriftCoefficients) -> float:
     """Deterministic part of the θ update."""
     return (
-        c.alpha * signals.invader_aggression
-        + c.beta * signals.occupation_fraction
-        + c.gamma * signals.legitimacy_loss
-        - c.delta * signals.defender_morale
-        - c.epsilon * signals.invader_concession
-        + c.zeta * signals.economic_pressure
+        c.alpha * signals.legitimacy_loss
+        + c.beta * signals.advance_action
+        + c.gamma * signals.strike_action
+        - c.delta * signals.negotiate_action
+        - c.epsilon * signals.seek_alliance_action
+        + c.zeta * signals.occupation_duration
     )
 
 
@@ -152,6 +151,7 @@ def insurgency_fires(t_occ: int, h: HazardParams, rng: np.random.Generator) -> b
 class RewardComponents:
     """All the parts of a single-step reward, useful for debugging and the UI."""
 
+    controlled_resource_yield: float = 0.0
     territory_gain: float = 0.0
     resource_gain: float = 0.0
     occupation_cost: float = 0.0
@@ -162,7 +162,8 @@ class RewardComponents:
 
     def total(self) -> float:
         return (
-            self.territory_gain
+            self.controlled_resource_yield
+            + self.territory_gain
             + self.resource_gain
             - self.occupation_cost
             - self.legitimacy_cost
@@ -174,6 +175,7 @@ class RewardComponents:
     def as_dict(self) -> dict[str, float]:
         return {
             "territory_gain": self.territory_gain,
+            "controlled_resource_yield": self.controlled_resource_yield,
             "resource_gain": self.resource_gain,
             "occupation_cost": -self.occupation_cost,
             "legitimacy_cost": -self.legitimacy_cost,
@@ -185,29 +187,159 @@ class RewardComponents:
 
 
 def compute_reward(
+    controlled_resources: float,
     delta_territory: float,
     delta_resources: float,
     t_occ: int,
     t_max: int,
     legitimacy: float,
     sanction_active: bool,
-    insurgency_event: bool,
+    economy: float,
+    insurgency_event: bool | int,
     weights: RewardWeights,
     flags: AblationFlags,
+    occupation_multiplier: float = 1.0,
 ) -> RewardComponents:
-    """Apply the per-step reward formula, gated by ablation flags."""
+    """Apply the per-step reward formula, gated by ablation flags.
+
+    `insurgency_event` accepts either a bool (legacy: 1 if any event fired this
+    turn, used by the global-hazard model) or an int (per-territory model: the
+    *count* of events that fired this turn). The cost scales with the count so
+    that wide-occupation episodes pay more under the per-territory model.
+    """
     rc = RewardComponents()
+    rc.controlled_resource_yield = weights.territory * controlled_resources
     rc.territory_gain = weights.territory * delta_territory
     rc.resource_gain = weights.resources * delta_resources
     if flags.occupation_cost_enabled:
-        rc.occupation_cost = weights.occupation * (t_occ / max(t_max, 1))
+        rc.occupation_cost = weights.occupation * (t_occ / max(t_max, 1)) * occupation_multiplier
     if flags.legitimacy_enabled:
         rc.legitimacy_cost = weights.legitimacy * (1.0 - legitimacy)
     if flags.sanctions_enabled and sanction_active:
-        rc.sanction_cost = weights.sanction
-    if flags.insurgency_enabled and insurgency_event:
-        rc.insurgency_cost = weights.insurgency
+        rc.sanction_cost = weights.sanction * (1.0 - economy)
+    if flags.insurgency_enabled:
+        n_events = int(insurgency_event) if insurgency_event else 0
+        if n_events > 0:
+            rc.insurgency_cost = weights.insurgency * n_events
     return rc
+
+
+# --------------------------------------------------------------------------------------
+# Settlement bonus.
+#
+# Replaces the previous flat +40 settlement payoff. The bonus interpolates between
+# `payoffs.settlement_min` and `payoffs.settlement_max` by a quality score over four
+# state variables. The point is that the agent has to *plan against* the cost
+# mechanisms across the whole episode to reach a high bonus — settling on the
+# earliest legal turn from a content-free state pays only the floor.
+# --------------------------------------------------------------------------------------
+
+
+def settlement_bonus(
+    territory_share: float,
+    legitimacy: float,
+    theta: float,
+    economy: float,
+    weights: SettlementBonusWeights,
+    payoffs: TerminalPayoffs,
+) -> float:
+    """Compute the (state-scaled) negotiated-settlement payoff.
+
+    Parameters
+    ----------
+    territory_share:
+        Fraction of non-invader-home territories controlled by the invader at
+        the moment of settlement, ∈ [0, 1]. 0 at reset, 1 at total conquest.
+        Saturates at `weights.territory_saturation` — extra captures beyond
+        that point give no further settlement credit. The point is to remove
+        the incentive for maximalist conquest *as a means of getting a higher
+        settlement*; territory beyond the saturation point should be pursued
+        only because the agent wants conquest for its own sake (which pays
+        the modest +10 conquest terminal, not the larger settlement bonus).
+    legitimacy, economy:
+        ∈ [0, 1]. Both directly enter the quality score.
+    theta:
+        ∈ [-1, +1]. Mapped to a `standing` score `(1 - θ) / 2` ∈ [0, 1] so that
+        a neutral aligned with the invader (θ = -1) gives full credit and a
+        neutral that has joined the defender (θ = +1) gives zero.
+    weights:
+        Per-dimension weights on the quality score.
+    payoffs:
+        Provides `settlement_min` and `settlement_max`.
+    """
+    legitimacy_span = max(1.0 - weights.legitimacy_floor, 1e-6)
+    legitimacy_score = (legitimacy - weights.legitimacy_floor) / legitimacy_span
+    legitimacy_score = max(0.0, min(1.0, legitimacy_score))
+    standing_score = (weights.theta_ceiling - theta) / (weights.theta_ceiling + 1.0)
+    standing_score = max(0.0, min(1.0, standing_score))
+    sat = max(weights.territory_saturation, 1e-6)
+    territory_term = min(territory_share, sat) / sat
+    quality = (
+        weights.territory * territory_term
+        + weights.legitimacy * legitimacy_score
+        + weights.standing * standing_score
+        + weights.economy * economy
+    )
+    quality = float(max(0.0, min(1.0, quality)))
+    span = payoffs.settlement_max - payoffs.settlement_min
+    return payoffs.settlement_min + span * quality
+
+
+# --------------------------------------------------------------------------------------
+# Settlement acceptance.
+#
+# Defender accepts terms iff the campaign has produced enough pressure on them
+# AND the invader's standing is healthy enough that an agreement is politically
+# viable. Both sides must hold. See :class:`SettlementAcceptance` for the
+# floors.
+# --------------------------------------------------------------------------------------
+
+
+@dataclass
+class AcceptanceVerdict:
+    accepted: bool
+    pressure_ok: bool
+    viability_ok: bool
+    reason: str            # short tag for logging when `accepted=False`
+
+
+def settlement_accepted(
+    territory_share: float,
+    defender_loss_fraction: float,
+    pressure_streak: int,
+    occupied_territory_turns: int,
+    legitimacy: float,
+    theta: float,
+    sanctions_active: bool,
+    cfg: SettlementAcceptance,
+) -> AcceptanceVerdict:
+    """Decide whether the defender will accept negotiation terms right now."""
+    attrition_pressure = (
+        defender_loss_fraction >= cfg.defender_loss_floor
+        and territory_share > 0.0
+    )
+    instant_pressure = territory_share >= cfg.territory_floor or attrition_pressure
+    pressure_ok = instant_pressure and (
+        pressure_streak >= cfg.pressure_streak_floor
+        or occupied_territory_turns >= cfg.occupied_turns_floor
+    )
+    viability_ok = (
+        legitimacy >= cfg.legitimacy_floor
+        and theta <= cfg.theta_ceiling
+        and not (cfg.sanctions_block and sanctions_active)
+    )
+    if pressure_ok and viability_ok:
+        return AcceptanceVerdict(True, True, True, "accepted")
+    # Reason tag — first failure wins, useful for debugging policies.
+    if not pressure_ok:
+        return AcceptanceVerdict(False, False, viability_ok, "no_pressure")
+    if legitimacy < cfg.legitimacy_floor:
+        return AcceptanceVerdict(False, True, False, "legitimacy_too_low")
+    if theta > cfg.theta_ceiling:
+        return AcceptanceVerdict(False, True, False, "standing_too_low")
+    if cfg.sanctions_block and sanctions_active:
+        return AcceptanceVerdict(False, True, False, "sanctions_active")
+    return AcceptanceVerdict(False, pressure_ok, viability_ok, "rejected")
 
 
 # --------------------------------------------------------------------------------------
@@ -242,12 +374,10 @@ def resolve_combat(
 
     effective_defenders = defenders * (1.0 + terrain_bonus_to_defender)
     # Casualty model: each side loses a fraction of the *opposing* effective force.
+    # Iter-8: rulebook §1 / §5-step-5 says combat is deterministic — noise
+    # term that was here under iter-1..7 has been removed.
     attacker_losses = effective_defenders * params.attacker_loss_rate
     defender_losses = attackers * params.defender_loss_rate
-
-    # Small symmetric noise so identical force ratios don't always resolve identically.
-    attacker_losses *= 1.0 + rng.normal(0.0, 0.05)
-    defender_losses *= 1.0 + rng.normal(0.0, 0.05)
 
     a_after = max(0.0, attackers - attacker_losses)
     d_after = max(0.0, defenders - defender_losses)

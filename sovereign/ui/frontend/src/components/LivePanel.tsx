@@ -18,7 +18,7 @@ export default function LivePanel() {
     political: [],
     military: [],
   });
-  const [mapName, setMapName] = useState<string>("default9");
+  const [mapName, setMapName] = useState<string>("rulebook9");
   const [regime, setRegime] = useState<string>("full");
   const [pol, setPol] = useState<number>(0);
   const [mil, setMil] = useState<number>(0);

@@ -20,6 +20,7 @@ type Props = {
 
 const KEYS = [
   { key: "territory_gain", color: "#6ba36b" },
+  { key: "controlled_resource_yield", color: "#3e8a6e" },
   { key: "resource_gain", color: "#5b8eda" },
   { key: "occupation_cost", color: "#d3a14b" },
   { key: "legitimacy_cost", color: "#c95757" },

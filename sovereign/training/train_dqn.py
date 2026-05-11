@@ -34,7 +34,7 @@ def make_env(regime: str, map_name: str, seed: int):
 def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--regime", choices=REGIME_NAMES, default="full")
-    p.add_argument("--map", dest="map_name", default="default9")
+    p.add_argument("--map", dest="map_name", default="rulebook9")
     p.add_argument("--steps", type=int, default=500_000)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--lr", type=float, default=1e-4)

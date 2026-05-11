@@ -67,7 +67,7 @@ class StepRequest(BaseModel):
 
 
 class ResetRequest(BaseModel):
-    map_name: str = "default9"
+    map_name: str = "rulebook9"
     regime: str = "full"
     seed: int | None = None
 

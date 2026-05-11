@@ -96,7 +96,35 @@ def list_maps() -> list[str]:
 
 
 # --------------------------------------------------------------------------------------
-# default9 — 3 invader-home + 3 defender-home + 3 contested with realistic adjacency.
+# rulebook9 — 1 home per nation + 6 contested, matching Sovereign.pdf Section 3.3.
+# --------------------------------------------------------------------------------------
+
+
+@register_map("rulebook9")
+def _rulebook9() -> MapSpec:
+    territories = (
+        Territory("I",  INVADER,   0.8, 0.9),  # 0 — invader home
+        Territory("D",  DEFENDER,  0.7, 0.9),  # 1 — defender home
+        Territory("N",  NEUTRAL,   0.6, 0.7),  # 2 — neutral home
+        Territory("C1", CONTESTED, 0.4, 0.5),  # 3
+        Territory("C2", CONTESTED, 0.5, 0.6),  # 4
+        Territory("C3", CONTESTED, 0.4, 0.8),  # 5
+        Territory("C4", CONTESTED, 0.6, 0.7),  # 6
+        Territory("C5", CONTESTED, 0.5, 0.6),  # 7
+        Territory("C6", CONTESTED, 0.7, 0.5),  # 8
+    )
+    edges = (
+        (0, 3), (0, 4),
+        (1, 7), (1, 8),
+        (2, 5), (2, 6),
+        (3, 4), (4, 5), (5, 6), (6, 7), (7, 8),
+        (3, 5), (4, 6), (5, 7),
+    )
+    return MapSpec("rulebook9", territories, edges)
+
+
+# --------------------------------------------------------------------------------------
+# default9 — legacy simplified map: 3 invader-home + 3 defender-home + 3 contested.
 # --------------------------------------------------------------------------------------
 
 
