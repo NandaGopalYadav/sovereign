@@ -15,8 +15,7 @@ the agent loses the ability to *end* the game through negotiation — aggression
 becomes costly not because of any single penalty, but because it forecloses
 the negotiated exit.
 
-See `PREP.md` for a comprehensive walkthrough of the design, algorithms, and
-results. See `Sovereign.pdf` for the rulebook.
+See `Sovereign.pdf` for the rulebook.
 
 ---
 
@@ -57,7 +56,6 @@ sovereign/
 │   ├── full.txt
 │   ├── baseline.txt
 │   └── no_legitimacy.txt
-├── PREP.md                          # comprehensive prep document for the presentation
 ├── Sovereign.pdf                    # the rulebook (ground truth for the spec)
 ├── pyproject.toml
 └── README.md                        # this file
@@ -168,8 +166,8 @@ See `demo-script.md` for the full speaker notes.
 
 > **Note:** the UI is a work-in-progress. The backend serves the data and the
 > frontend renders the basics, but several views are still stubs — we plan to
-> finish it in a follow-up iteration. All headline results in `PREP.md` come
-> from the CLI workflows above; the UI is not required to reproduce anything.
+> finish it in a follow-up iteration. The CLI workflows above are sufficient
+> to reproduce all results; the UI is not required.
 
 Backend (port 8000):
 ```bash
@@ -288,8 +286,7 @@ require agents that internalise the cost of unilateral action on third-party
 trust. SOVEREIGN is a much smaller, more transparent setup (one learning
 agent, two scripted opponents, six mechanism levers) designed to ask which
 of those mechanisms, individually, is *necessary* for the dominated-strategy
-result to emerge under PPO. See `RESEARCH.md` for the full argument and
-`PREP.md` for the implementation walkthrough.
+result to emerge under PPO. See `RESEARCH.md` for the full argument.
 
 ---
 
